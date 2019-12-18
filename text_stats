@@ -1,0 +1,194 @@
+#!/usr/bin/python3.7
+import sys
+import csv
+import operator
+import math
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
+
+import spacy
+from nltk import word_tokenize
+from nltk import Text
+from nltk.corpus import stopwords
+from nltk.stem import SnowballStemmer
+
+#escritura fichero
+csv= csv.writer(open('stats.csv','w'), delimiter=';', 
+quotechar='"', quoting=csv.QUOTE_MINIMAL)
+pdf = PdfPages('graphs.pdf')
+txt = open("fragments.txt","w")
+
+"""Grafica en pdf las frecuencias"""
+def plot_freq(freq, title):
+	fig = plt.figure(figsize = (10,4))
+	x, y = zip(*freq) # unpack a list of pairs into two tuples
+	plt.plot(x, y)
+	plt.xticks(rotation='vertical')
+	if max(y)<12:
+		plt.yticks(range(min(y), math.ceil(max(y))+1))
+	plt.grid(b=True)
+	plt.title(title + " - Frecuencia")
+	pdf.savefig(fig,bbox_inches='tight')
+	plt.clf()
+	
+"""Calcula y grafica en pdf la dispersion"""
+def plot_disp(palabras, title,indices_dict):
+	fig = plt.figure(figsize = (13,10))
+	points = []
+	palabras.reverse()
+	for w in range(len(palabras)):
+		for i in indices_dict[palabras[w]]:
+			points.append((i,w))
+	x,y = zip(*points)
+	plt.plot(x,y,"b|") #,
+	plt.yticks(range(len(palabras)), palabras) #ToDo: concatenar freq_dict
+	plt.ylim(-1,len(palabras))
+	plt.grid(axis='y')
+	plt.title(title+ " - Dispersion")
+	pdf.savefig(fig,bbox_inches='tight')
+	plt.clf()
+
+"""https://en.wikipedia.org/wiki/Lexical_diversity"""
+def lexical_diversity(text):
+	return len(set(text)) / len(text)
+
+"""Dado un texto y una palabra, 
+calcula su frecuencia, posiciones y distancias"""
+def word_stats(text, word, word_min_freq): 
+	min_dist = sys.maxsize 
+	freq=1
+	#ToDo? optimal index of first occurence at https://stackoverflow.com/questions/7632963/numpy-find-first-index-of-value-fast/7654768
+	i=text.index(word)
+	previous_index=i
+	indices=[i]
+	dist_ind=[]
+	while i < len(text)-1: 
+		i+=1 
+		if text[i] == word:
+			freq+=1
+			dist = i - previous_index
+			indices.append(i) 
+			dist_ind.append((dist,previous_index))
+			if dist < min_dist : 
+				min_dist = dist
+				previous_index = i 
+			else: 
+				previous_index = i
+	if freq>word_min_freq:
+		return (word, freq), (word,min_dist),indices, dist_ind
+		
+"""Globaliza y pinta word_stats"""
+def text_stats(text,words,title_prefix,
+	word_min_freq=1,word_min_dist=500,
+	plot_freq_num=40,dispersion_plot_num=39,
+	extra_context=0):
+
+	#word_stats for all words in text 
+	freq = []
+	dist = [] 
+	dist_indices = []
+	freq_dict = dict()
+	indices_dict = dict()
+	for word in set(words):
+		values = word_stats(text, word,word_min_freq)
+		if values:
+			freq.append(values[0])
+			dist.append(values[1])
+			dist_indices.extend(values[3])
+			freq_dict[word]=values[0][1]
+			indices_dict[word]=values[2]
+	
+	#preprocesamiento
+	freq.sort(key = operator.itemgetter(1), reverse = True)
+	palabras_mas_comunes=freq[0:plot_freq_num]
+	
+	palabras_por_cercania= [i[0] for i in 
+	sorted(dist, key = operator.itemgetter(1))]
+	palabras_mas_cercanas= palabras_por_cercania[0:dispersion_plot_num]
+	
+	#aux fragmentos con palabras mas cercanas
+	dist_indices_sort= [i for i 
+	in sorted(dist_indices,key = operator.itemgetter(0)) 
+	if i[0] < word_min_dist
+	and i[0]<len(text)/freq_dict[text[i[1]]]] #no equidistante
+	
+	#plots y prints
+	freq_title=(title_prefix + 
+	" más comunes ("+str(len(freq))+")")
+	disp_title =(title_prefix + 
+	" más cercanas ("+str(len(dist_indices_sort))+")") 
+	plot_freq(palabras_mas_comunes, freq_title);
+	plot_disp(palabras_mas_cercanas, disp_title,indices_dict);
+	plot_disp([wf[0] for wf in palabras_mas_comunes], 
+	freq_title,indices_dict);
+	
+	#ToDo: append column para order de AutoFilter de excel
+	csv.writerow([title_prefix,'freq','dist'])
+	for wd in dist:
+			csv.writerow([wd[0], freq_dict[wd[0]], wd[1]])
+	
+	#ToDo: color word si context no 0: txt->rtf
+	#ToDo: si misma distancia, pintar primero mas repetida, y si iguales, agrupar por misma palabra (i.e., sort ternario en preprocesamiento, construyendolo adecuadamente en word_stats)
+	txt.writelines(['--- ',title_prefix,' ---\n'])
+	for di in dist_indices_sort:
+		txt.writelines([text[di[1]], ': #',
+		str(freq_dict[text[di[1]]]),', d',str(di[0]),'\n'])
+		txt.writelines([' '.join(text[di[1]-extra_context:
+		di[1]+di[0]+1+extra_context]), '\n\n'])
+
+#lectura fichero
+filename = sys.argv[1]
+file = open(filename)
+text = file.read()
+
+#normalizar texto
+tokens = [token.lower() 
+for token in word_tokenize(text) 
+if token.isalpha()] 
+text_tokenize = Text(tokens)
+
+#global basic stats -ToDo: añadir más y confrontar contra corpus, propio o ajeno
+print ("Cantidad de palabras: ",len(text_tokenize))
+print ("Diversidad lexica: ",lexical_diversity(text_tokenize))
+
+#Desagregar en tipos. ToDo: refinar via diccionario: {preposiciones => array_vacio, prep_alike, adverbios_comunes, verbos_auxiliares} (creado a partir de los tipos de nltk, pos en spacy, versiones con y sin lemantizacion), y añadir token si es del tipo correspondiente (elseif o switch like)
+palabras_vacias = stopwords.words('spanish')
+tokens_clean = tokens[:]
+tokens_dirty = tokens[:]
+for token in tokens:
+    if token in palabras_vacias:
+        tokens_clean.remove(token)
+    else:
+        tokens_dirty.remove(token)
+
+#ToDo encapsular codigo duplicado con lambda?
+#mapear flexiones y derivaciones a lemas (diccionario) y raices
+stemmer = SnowballStemmer('spanish')
+tokens_stems = [stemmer.stem(t) for t in tokens]
+tokens_stems_clean = [stemmer.stem(t) for t in tokens_clean]  
+text_stem = Text(tokens_stems)
+
+nlp = spacy.load('es_core_news_sm') #alt: es_core_news_md (small vs medium)
+text_spacy = nlp(text) 
+tokens_lemas = [t.lemma_.lower() 
+for t in text_spacy 
+if t.is_alpha]
+tokens_lemas_clean = [t.lemma_.lower() 
+for t in text_spacy 
+if t.is_alpha and not t.is_stop]
+text_lemas = Text(tokens_lemas)
+
+#ToDo Admitir array en texto y tokens, cuando se desagregen los tipos de tokens en el punto anterior 
+text_stats(text_tokenize, tokens_clean, 
+title_prefix="Palabras no vacias")
+text_stats(text_tokenize,tokens_dirty, 
+title_prefix="Palabras vacias",extra_context=4, word_min_dist=250)
+text_stats(text_lemas, tokens_lemas_clean, 
+title_prefix="Lemas no vacios")
+text_stats(text_stem, tokens_stems_clean, 
+title_prefix="Raíces no vacias")
+
+pdf.close()
+
+#ToDo: rename variables to more explicit names, avoid spanglish
+#ToDo: centralizar constantes hardcodeadas (e.g., valores de fig en plot, if)
