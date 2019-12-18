@@ -1,0 +1,24 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Path::Tiny qw(path);
+
+#read file
+my $filename = shift;
+my $file     = path($filename);
+my $data     = $file->slurp_utf8;
+
+#ToDo: <div math> -> $$, for MathJax
+my %diccionario = (
+	"<br \/>\n\n<\/div>" => "<\/div><br\/>",
+	'^.*?<head>'         => '<head>',
+	'<\/body>.*'         => '',
+	'<body.*?>'          => '',
+	'(?<=div.standard \{\n\ttext-indent: 2em;\n\tmargin-bottom: )\d(?=ex;\n\})' => '0'
+);
+
+for my $key ( keys %diccionario ) {
+	$data =~ s/$key/$diccionario{$key}/gms;
+}
+
+$file->spew_utf8($data);
