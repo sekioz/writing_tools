@@ -7,3 +7,8 @@ Sort of copycat of prowritingaid due to its limitations for the free Spanish ver
 
 ## lyx_html_converter.pl
 Intermediate step between the LyxHTML conversion and my blog
+perl -MCPAN -e shell
+cpan
+install Path::Tiny
+
+
